@@ -1,0 +1,84 @@
+# --- Secrets / local configuration -------------------------------------------
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Local Docker overrides
+docker-compose.override.yml
+docker-compose.*.local.yml
+
+# --- Python / Django ---------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+.eggs/
+*.egg
+*.egg-info/
+
+# Packaging and build output
+build/
+dist/
+*.whl
+
+# Django runtime output
+staticfiles/
+spa_dist/
+media/
+local_settings.py
+*.sqlite3
+db.sqlite3
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
+
+# Testing / type checking / linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Node / frontend ---------------------------------------------------------
+node_modules/
+.vite/
+*.tsbuildinfo
+.eslintcache
+coverage/
+
+# Test output (Vitest / Playwright)
+test-results/
+playwright-report/
+blob-report/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Logs and temporary files ------------------------------------------------
+*.log
+logs/
+tmp/
+*.tmp
+
+# --- Editors and operating systems -------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

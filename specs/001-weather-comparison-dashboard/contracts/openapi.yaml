@@ -1,0 +1,570 @@
+openapi: 3.0.3
+info:
+  title: Two-City Weather Comparison API
+  version: 1.0.0
+  description: >
+    REST contract for the weather comparison dashboard. All routes are served from the Django
+    origin root. Timestamps are ISO 8601 UTC. Errors share a single envelope. The external weather
+    provider is never called by browsers; every read and write passes through this API.
+servers:
+  - url: /
+    description: Same origin as the dashboard SPA
+
+tags:
+  - name: health
+  - name: weather
+  - name: dashboard
+  - name: cities
+
+paths:
+  /health/:
+    get:
+      tags: [health]
+      summary: Readiness of storage, cache, scheduler and provider configuration
+      operationId: getHealth
+      responses:
+        "200":
+          description: Component status snapshot; the API can serve requests even when the provider is unconfigured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: >-
+            Storage is unavailable and the API cannot serve data; the error's
+            details carry the component snapshot (database, cache, provider_configured,
+            scheduler, version).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /weather/:
+    get:
+      tags: [weather]
+      summary: List stored observations, newest first, with backend pagination
+      operationId: listWeather
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/City"
+        - $ref: "#/components/parameters/Start"
+        - $ref: "#/components/parameters/End"
+      responses:
+        "200":
+          description: One page of stored observations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedObservations"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /dashboard-data/:
+    get:
+      tags: [dashboard]
+      summary: Optimized payload for the comparison view, charts and freshness badges
+      operationId: getDashboardData
+      parameters:
+        - name: cities
+          in: query
+          required: false
+          description: >
+            Exactly two comma-separated city names, distinct after normalization. When omitted,
+            the two cities with the most recent stored observations are used (0, 1 or 2 returned).
+          schema:
+            type: string
+            example: Santiago,Valparaiso
+          style: form
+          explode: false
+        - name: window
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Window"
+        - $ref: "#/components/parameters/Refresh"
+      responses:
+        "200":
+          description: Current readings, bucketed series and comparison summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardData"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: No stored data exists and the provider is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /weather/refresh/:
+    post:
+      tags: [weather]
+      summary: Fetch current conditions for two cities, persist them and announce them
+      description: >
+        The only mutating endpoint. Requires a JSON content type, validates the same-origin
+        header, and is rate limited. On provider failure it returns the most recent stored reading
+        marked as stale instead of failing, unless no reading exists at all.
+      operationId: refreshWeather
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Snapshot after refresh; each city reports live or stale source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardData"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Missing or cross-origin request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: No stored reading and the provider is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /weather/export/:
+    get:
+      tags: [weather]
+      summary: Stream matching observations as CSV
+      description: >
+        Honors the same city filter and window as the list endpoint, ignores pagination, and emits
+        a header row plus RFC 4180 quoting. Cells beginning with =, +, - or @ are prefixed with a
+        single quote to neutralize spreadsheet formula injection.
+      operationId: exportWeather
+      parameters:
+        - $ref: "#/components/parameters/City"
+        - $ref: "#/components/parameters/Start"
+        - $ref: "#/components/parameters/End"
+        - name: window
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Window"
+      responses:
+        "200":
+          description: CSV file
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: attachment; filename="weather-observations.csv"
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: |
+                id,city,country_code,temperature_c,humidity_pct,wind_speed_ms,timestamp
+                1042,Santiago,CL,18.40,62,3.10,2026-11-25T14:00:00Z
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /cities/search/:
+    get:
+      tags: [cities]
+      summary: Resolve a city name to provider-backed candidates
+      description: >
+        Resolves in documented order: Redis geocoding cache, PostgreSQL observations already
+        stored, then the provider geocoding service. The credential never reaches the browser.
+        Provider results are cached for 24 hours and misses are cached negatively for 10 minutes.
+      operationId: searchCities
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 80
+          example: San
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 5
+      responses:
+        "200":
+          description: Matching cities, possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CityCandidate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    City:
+      name: city
+      in: query
+      required: false
+      description: Case-insensitive exact match on the normalized city key
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 80
+    Start:
+      name: start
+      in: query
+      required: false
+      description: Inclusive lower bound, ISO 8601
+      schema:
+        type: string
+        format: date-time
+    End:
+      name: end
+      in: query
+      required: false
+      description: Exclusive upper bound, ISO 8601; must be later than start
+      schema:
+        type: string
+        format: date-time
+    Refresh:
+      name: refresh
+      in: query
+      required: false
+      description: When true, attempts a provider fetch before assembling the payload
+      schema:
+        type: boolean
+        default: false
+
+  responses:
+    BadRequest:
+      description: Invalid input; details name every rejected field
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: Rate limit exceeded; retry after the advertised delay
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Window:
+      type: string
+      enum: [24h, 7d, 30d]
+      default: 24h
+
+    CityCandidate:
+      type: object
+      required: [name, city_key, country_code, provider_city_id]
+      properties:
+        name:
+          type: string
+          example: Santiago
+        city_key:
+          type: string
+          example: santiago
+        country_code:
+          type: string
+          minLength: 2
+          maxLength: 2
+          example: CL
+        state:
+          type: string
+          nullable: true
+          example: Region Metropolitana
+        provider_city_id:
+          type: integer
+          example: 3871336
+
+    CurrentReading:
+      type: object
+      required: [temperature, humidity, wind_speed]
+      properties:
+        temperature:
+          type: number
+          format: double
+          description: Degrees Celsius
+        humidity:
+          type: integer
+          minimum: 0
+          maximum: 100
+        wind_speed:
+          type: number
+          format: double
+          description: Meters per second
+
+    SeriesPoint:
+      type: object
+      required: [bucket_start, temperature, humidity, wind_speed, sample_count]
+      properties:
+        bucket_start:
+          type: string
+          format: date-time
+        temperature:
+          type: number
+          format: double
+        humidity:
+          type: number
+          format: double
+        wind_speed:
+          type: number
+          format: double
+        sample_count:
+          type: integer
+          minimum: 1
+
+    CitySnapshot:
+      type: object
+      required: [city, city_key, source, freshness, current, series]
+      properties:
+        city:
+          type: string
+        city_key:
+          type: string
+        country_code:
+          type: string
+          nullable: true
+        source:
+          type: string
+          enum: [live, stale]
+        freshness:
+          type: string
+          enum: [current, stale, unavailable]
+        observed_at:
+          type: string
+          format: date-time
+          nullable: true
+        age_seconds:
+          type: integer
+          minimum: 0
+          nullable: true
+        current:
+          type: object
+          nullable: true
+          required: [temperature, humidity, wind_speed]
+          properties:
+            temperature:
+              type: number
+              format: double
+            humidity:
+              type: integer
+              minimum: 0
+              maximum: 100
+            wind_speed:
+              type: number
+              format: double
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
+        reason:
+          type: string
+          nullable: true
+          description: >-
+            Present when a provider refresh failed and stored data was served instead:
+            credential_invalid, rate_limited or provider_unavailable.
+
+    ComparisonSummary:
+      type: object
+      properties:
+        temperature_delta:
+          type: number
+          format: double
+          nullable: true
+          description: First city minus second city in degrees Celsius
+        humidity_delta:
+          type: number
+          format: double
+          nullable: true
+        wind_speed_delta:
+          type: number
+          format: double
+          nullable: true
+        warmer_city:
+          type: string
+          nullable: true
+
+    DashboardData:
+      type: object
+      required: [generated_at, window, bucket, cities]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        window:
+          $ref: "#/components/schemas/Window"
+        bucket:
+          type: string
+          enum: [15m, 2h, 12h]
+        cities:
+          type: array
+          minItems: 0
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/CitySnapshot"
+        comparison:
+          $ref: "#/components/schemas/ComparisonSummary"
+
+    Observation:
+      type: object
+      required: [id, city, city_key, temperature, humidity, wind_speed, timestamp]
+      properties:
+        id:
+          type: integer
+          format: int64
+        city:
+          type: string
+        city_key:
+          type: string
+        country_code:
+          type: string
+          nullable: true
+        temperature:
+          type: number
+          format: double
+        humidity:
+          type: integer
+        wind_speed:
+          type: number
+          format: double
+        timestamp:
+          type: string
+          format: date-time
+
+    PaginatedObservations:
+      type: object
+      required: [count, page, page_size, total_pages, results]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+        total_pages:
+          type: integer
+          minimum: 0
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/Observation"
+
+    RefreshRequest:
+      type: object
+      required: [cities]
+      additionalProperties: false
+      properties:
+        cities:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 80
+
+    Health:
+      type: object
+      required: [status, database, cache, provider_configured, scheduler]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        database:
+          type: string
+          enum: [up, down]
+        cache:
+          type: string
+          enum: [up, down]
+        provider_configured:
+          type: boolean
+        scheduler:
+          type: string
+          enum: [up, unknown]
+        version:
+          type: string
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_city
+                - duplicate_city
+                - unknown_city
+                - invalid_pagination
+                - invalid_window
+                - invalid_range
+                - provider_unavailable
+                - credential_invalid
+                - rate_limited
+                - no_data_available
+                - cross_origin_rejected
+                - internal_error
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            request_id:
+              type: string

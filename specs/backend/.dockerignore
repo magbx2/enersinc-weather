@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.pytest_cache
+__pycache__
+*.pyc
+.env*
+staticfiles
+spa_dist
