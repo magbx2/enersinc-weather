@@ -3,7 +3,8 @@
 Compare current and historical weather for two cities on a single local origin. Django owns
 all provider access and storage, Redis provides the documented response cache and the live
 update layer, and a React SPA is served by Django at `/`. The whole stack starts with one
-command and survives restarts.
+command and survives restarts. Repository artifacts and code are English; every visible string
+authored by the dashboard is Spanish.
 
 ## Quick start
 
@@ -41,6 +42,8 @@ curl -s http://localhost:8000/health/ | jq
 - CSV export of the filtered window with RFC 4180 quoting and formula-injection hardening.
 - Mandatory Redis cache with deterministic keys, documented TTLs and O(1) invalidation.
 - Celery worker/beat ingesting recently active cities every minute.
+- Stored-default root view and city search that falls back from Redis to PostgreSQL to the provider.
+- Spanish dashboard copy (`lang="es"`) while the repository and contracts stay English.
 
 ## Architecture at a glance
 
@@ -106,6 +109,7 @@ docs/         Architecture and performance notes
 | Situation | Result |
 |---|---|
 | Provider key missing or rejected | Boot succeeds; readings come from storage and are marked stale |
+| Provider unavailable during city search | Stored cities still appear; the provider is only the third resolution step |
 | Provider slow, 5xx or rate-limited | Retried twice, then the latest stored row is returned as stale |
 | Redis down | Requests still succeed from PostgreSQL; cache errors are logged as `cache_error` |
 | No rows at all and provider unavailable | `503` with `no_data_available`; the UI shows an explicit empty state |
@@ -116,6 +120,8 @@ docs/         Architecture and performance notes
 
 ## Documentation
 
+- [.specify/memory/constitution.md](.specify/memory/constitution.md) — project principles, including
+  the English-artifacts/Spanish-UX rule.
 - [specs/001-weather-comparison-dashboard/quickstart.md](specs/001-weather-comparison-dashboard/quickstart.md)
   — validation scenarios and recorded results.
 - [specs/001-weather-comparison-dashboard/contracts/openapi.yaml](specs/001-weather-comparison-dashboard/contracts/openapi.yaml)

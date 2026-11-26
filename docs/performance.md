@@ -2,11 +2,11 @@
 
 Measured on the development machine with the Compose stack (`postgres` and `redis` containers,
 Django served by Daphne), 2026-11-25. Numbers are informational; the assertions live in the
-automated tests.
+automated tests and in the quickstart V8 probes.
 
 | Scenario | Target | Measured | Evidence |
 |---|---|---|---|
-| Cached dashboard payload | p95 < 500 ms | 4–6 ms (3 sequential requests) | `curl -w '%{time_total}'` against `/dashboard-data/` |
+| Cached dashboard payload | p95 < 500 ms | 4–6 ms (3 sequential requests; p95 probe pending) | `curl -w '%{time_total}'` against `/dashboard-data/`; 20-request probe in quickstart V8 |
 | Cold dashboard payload for a new pair | p95 < 2 s | 36 ms | first request for a pair with stored rows, empty cache |
 | SQL statements for one dashboard assembly | bounded/constant | 4 (2 latest rows + 2 bucket aggregates) | `weather/tests/integration/test_query_count.py` |
 | Second dashboard read within TTL | no repeated queries | 0 SQL statements | same test |
@@ -30,6 +30,12 @@ queryset with a chunk size of 2,000 and streams rows, so memory does not grow wi
 ```bash
 time curl -s -o /dev/null "http://localhost:8000/dashboard-data/?cities=Santiago,Valparaiso&window=24h"
 time curl -s -o /dev/null "http://localhost:8000/weather/?page=1&page_size=20"
+
+# Cached p95 over 20 sequential requests (SC-003)
+for i in $(seq 1 20); do
+  curl -s -o /dev/null -w '%{time_total}\n' \
+    "http://localhost:8000/dashboard-data/?cities=Santiago,Valparaiso&window=24h"
+done | sort -n | awk '{a[NR]=$1} END {print "p95:", a[int(NR*0.95)]}'
 
 docker compose exec backend pytest -q \
   weather/tests/integration/test_query_count.py \

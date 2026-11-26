@@ -22,9 +22,12 @@ dual-series tooltips); Nivo or Chart.js (viable, but Recharts has the smallest i
 ## R2. External provider integration and error taxonomy
 
 **Decision**: Use OpenWeather Geocoding `/geo/1.0/direct` for city resolution and Current Weather
-`/data/2.5/weather` with `units=metric` for observations. Resolve each city to a provider city id
-and country code before storing. Apply a 5-second connect/read timeout, at most 2 retries with
-exponential backoff on 429/5xx/network errors, and no retry on 401/404.
+`/data/2.5/weather` with `units=metric` for observations. Resolve each city to a provider candidate
+(id, latitude/longitude, country code) before fetching the reading; persist the display name,
+normalized `city_key` and country code, while the numeric provider id remains search-only. Apply a
+5-second connect/read timeout, at most 2 retries with exponential backoff on 429/5xx/network errors,
+and no retry on 401/403/404. City search resolves through Redis, then PostgreSQL, then the provider,
+so stored cities remain available in degraded mode.
 
 Error classes mapped to behavior:
 
@@ -81,7 +84,8 @@ older than the stated freshness window).
 
 **Decision**: Django Channels with `channels-redis` as the group layer. One consumer at
 `/ws/weather/` accepts a validated `cities` query parameter (exactly two distinct city keys),
-subscribes the connection to group `weather.{city_key}` per city, and emits:
+subscribes the connection to `weather.<sha256(city_key)[:32]>` per city (via
+`weather.realtime.channel_group`), and emits:
 
 - `snapshot` on connect, containing the current dashboard payload so the client renders immediately;
 - `observation` when a row is inserted, containing the observation and its source;

@@ -32,7 +32,7 @@ microspec and is not represented here.
 **Purpose**: Repository skeleton, dependency manifests, container definitions, and settings that
 every later phase builds on.
 
-- [X] T001 Create the repository skeleton (`backend/`, `frontend/`, `scripts/`) and `.gitignore` covering `__pycache__/`, `node_modules/`, `.env`, `dist/`, `staticfiles/`, `.pytest_cache/`
+- [X] T001 Create the repository skeleton (`backend/`, `frontend/`, `scripts/`) and a root `.gitignore` covering Python caches and virtualenvs, `.env*` (keeping `.env.example`), Django runtime output (`staticfiles/`, `spa_dist/`, `media/`, SQLite), Celery schedules, test/type-check caches, `node_modules/`, frontend build/test output, logs, temporary files and editor/OS metadata
 - [X] T002 Create `backend/pyproject.toml` pinning Django 5.1, DRF 3.15, Channels 4, channels-redis, daphne, django-redis, psycopg 3, Celery 5.4, WhiteNoise, plus pytest, pytest-django, respx, freezegun, ruff and mypy configuration
 - [X] T003 [P] Create `frontend/package.json`, `frontend/tsconfig.json`, and `frontend/vite.config.ts` with React 18, Vite 5, TypeScript 5.6, Ant Design 5, TanStack Query 5, Recharts 2, React Router 6, Vitest, React Testing Library and MSW
 - [X] T004 [P] Create `.env.example` at the repository root documenting `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `REDIS_URL`, `OPENWEATHER_API_KEY`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `BACKEND_PORT`, `ALLOWED_HOSTS`, and state that an empty provider key means degraded mode, not failure
@@ -94,17 +94,17 @@ produces a validation message and no fabricated values.
 
 ### Implementation for User Story 1
 
-- [X] T030 [US1] Implement the dashboard assembly service in `backend/weather/services/dashboard.py`: fetch the latest row per city, compute per-metric deltas and `warmer_city`, derive `freshness` from `age_seconds <= 60`, and return `null` values when a city has no row instead of zeroes
-- [X] T031 [US1] Implement `GET /dashboard-data/` in `backend/weather/views.py` using the 30-second dashboard cache key, `refresh=true` support, request-id logging, and the documented error envelope
+- [X] T030 [US1] Implement the dashboard assembly service in `backend/weather/services/dashboard.py`: read the latest row per city through the `weather:current` cache-aside helper, compute per-metric deltas and `warmer_city`, derive `freshness` from `age_seconds <= 60`, return `null` values when a city has no row instead of zeroes, and return a neutral comparison when fewer than two cities are present
+- [X] T031 [US1] Implement `GET /dashboard-data/` in `backend/weather/views.py` using the 30-second dashboard cache key, `refresh=true` support, request-id logging, and the documented error envelope; when `cities` is omitted, return the latest stored pair from PostgreSQL (zero, one or two cities) instead of raising an error
 - [X] T032 [US1] Implement `POST /weather/refresh/` in `backend/weather/views.py`: validate the two cities, fetch through the provider client, insert observations, invalidate the affected cache keys, and return the assembled snapshot with per-city `source`
-- [X] T033 [US1] Implement `GET /cities/search/` in `backend/weather/views.py` proxying provider geocoding with `limit` 1–10, 24-hour positive caching, 10-minute negative caching, and `invalid_city` for malformed queries
+- [X] T033 [US1] Implement `GET /cities/search/` in `backend/weather/views.py` and `backend/weather/services/cities.py` with the documented resolution order (Redis geocoding cache -> PostgreSQL stored observations -> OpenWeather), `limit` 1–10, 24-hour positive caching, 10-minute negative caching, `City Country` retried as `City,Country`, stored-city results available without a provider key, and `invalid_city` for malformed queries
 - [X] T034 [US1] Add DRF throttle classes and rates for refresh and export endpoints in `backend/config/settings.py`, and verify the 429 envelope in a test
-- [X] T035 [US1] Create the typed API client in `frontend/src/api/client.ts` and payload types in `frontend/src/types/weather.ts`, including abort support, error-envelope parsing, and no direct provider or absolute external URLs
+- [X] T035 [US1] Create the typed API client in `frontend/src/api/client.ts` and payload types in `frontend/src/types/weather.ts`, including abort support, error-envelope parsing, a nullable city pair for the default root view, and no direct provider or absolute external URLs
 - [X] T036 [US1] Implement `frontend/src/components/CitySelector.tsx` with Ant Design AutoComplete, 300 ms debounce, keyboard navigation, duplicate rejection, and accessible labels and messages
 - [X] T037 [US1] Implement `frontend/src/components/CurrentComparison.tsx` with side-by-side metric panels that stack below 768 px, signed deltas, UTC-derived local timestamps, and freshness/source badges
-- [X] T038 [US1] Implement `frontend/src/pages/Dashboard.tsx` and update `frontend/src/App.tsx` so the two selected cities live in the URL query string and deep links restore the view
+- [X] T038 [US1] Implement `frontend/src/pages/Dashboard.tsx` and update `frontend/src/App.tsx` so the two selected cities live in the URL query string, deep links restore the view, and the stored default pair returned for `/` is reflected back into the URL
 - [X] T039 [US1] Add loading skeletons, an empty "choose two cities" state, an error state with retry, and a stale-data banner for the comparison region in `frontend/src/components/CurrentComparison.tsx`
-- [X] T040 [US1] Wire TanStack Query in `frontend/src/hooks/useDashboardData.ts` with a 60-second refetch interval, manual refresh mutation, and cache keys that include both city keys and the window
+- [X] T040 [US1] Wire TanStack Query in `frontend/src/hooks/useDashboardData.ts` with a 60-second refetch interval, manual refresh mutation, cache keys that include both city keys and the window, and a null-pair query that loads the stored defaults while the live socket stays disabled until two cities are selected
 - [X] T041 [US1] Create `frontend/src/lib/time.ts` for timezone-aware timestamp formatting and relative age labels, with unit tests in `frontend/src/lib/time.test.ts`
 - [X] T042 [US1] Run the US1 test subsets (`backend/weather/tests/contract/test_dashboard_data.py`, `backend/weather/tests/contract/test_refresh.py`, `backend/weather/tests/integration/test_compare_flow.py`, `frontend/src/components/*.test.tsx`), fix failures, and record the commands in the story checkpoint
 
@@ -155,10 +155,10 @@ stored data and show an empty state rather than an error.
 
 ### Tests for User Story 3 ⚠️
 
-- [X] T055 [P] [US3] Contract test for `GET /weather/` in `backend/weather/tests/contract/test_weather_list.py`: default page size 20, maximum 100, `page` echoes, `total_pages` correct, `city` filter exact and case-insensitive, `start`/`end` bounds, invalid ranges return 400 `invalid_range`, invalid page returns 400 `invalid_pagination`
+- [X] T055 [P] [US3] Contract test for `GET /weather/` in `backend/weather/tests/contract/test_weather_list.py`: default page size 20, maximum 100, `page` echoes, `total_pages` correct, `city` filter exact and case-insensitive, `start`/`end` bounds, invalid ranges return 400 `invalid_range`, a page below 1 or a non-integer page returns 400 `invalid_pagination`, and a page beyond the last returns 200 with an empty `results` array
 - [X] T056 [P] [US3] Integration test for series bucketing in `backend/weather/tests/integration/test_series.py`: 15-minute buckets for 24h, 2-hour for 7d, 12-hour for 30d, averages match fixtures, and empty buckets are omitted rather than zero-filled
 - [X] T057 [P] [US3] Component test for the table in `frontend/src/components/ObservationsTable.test.tsx`: server pagination calls, page-size change, city filter, URL synchronization, and out-of-range empty state
-- [X] T058 [P] [US3] Component test for charts in `frontend/src/components/HistoryCharts.test.tsx`: both series rendered, window switch refetches with the new window, and gaps render as gaps
+- [X] T058 [P] [US3] Component test for charts in `frontend/src/components/HistoryCharts.test.tsx`: both series rendered, window switch refetches with the new window, the active city filter narrows the chart series, and gaps render as gaps
 
 ### Implementation for User Story 3
 
@@ -167,7 +167,7 @@ stored data and show an empty state rather than an error.
 - [X] T061 [US3] Extend the dashboard payload in `backend/weather/services/dashboard.py` and `backend/weather/serializers.py` with `series` and `bucket`, cached under the documented series keys with version invalidation
 - [X] T062 [US3] Verify the three indexes from `data-model.md` exist in `backend/weather/migrations/` and add a follow-up migration only if any are missing; capture `EXPLAIN` output for the filtered-page and latest-row queries
 - [X] T063 [US3] Implement `frontend/src/components/ObservationsTable.tsx` with Ant Design Table server pagination, page-size selector, city filter, newest-first ordering, total display, and URL-synchronized state
-- [X] T064 [US3] Implement `frontend/src/components/HistoryCharts.tsx` with Recharts, dual-city series on a shared time axis, a 24h/7d/30d selector, and a responsive container
+- [X] T064 [US3] Implement `frontend/src/components/HistoryCharts.tsx` with Recharts, dual-city series on a shared time axis, a 24h/7d/30d selector, a responsive container, and a city-filtered series view driven by `Dashboard.tsx`
 - [X] T065 [US3] Add loading skeletons, distinct empty states for "no history yet" versus "no rows match this filter", error retry, and a horizontal scroll wrapper for the table below 576 px in `frontend/src/components/HistoryCharts.tsx` and `frontend/src/components/ObservationsTable.tsx`
 - [X] T066 [US3] Run the US3 test subsets (`backend/weather/tests/contract/test_weather_list.py`, `backend/weather/tests/integration/test_series.py`, `frontend/src/components/ObservationsTable.test.tsx`, `frontend/src/components/HistoryCharts.test.tsx`) and fix failures
 
@@ -186,7 +186,7 @@ paused indicator, restart it, and confirm recovery without duplicates.
 
 ### Tests for User Story 4 ⚠️
 
-- [X] T067 [P] [US4] Contract test for `/ws/weather/` in `backend/weather/tests/contract/test_websocket.py` using `WebsocketCommunicator`: `snapshot` on connect, `observation` after insert, `heartbeat` shape, and close code 4001 with an `error` frame for duplicate, missing or unknown cities
+- [X] T067 [P] [US4] Contract test for `/ws/weather/` in `backend/weather/tests/contract/test_websocket.py` using `WebsocketCommunicator`: `snapshot` on connect, `observation` after insert, `heartbeat` shape, city keys containing spaces join a valid channel group, and close code 4001 with an `error` frame for duplicate, missing or unknown cities
 - [X] T068 [P] [US4] Integration test for fan-out in `backend/weather/tests/integration/test_realtime.py`: an event is emitted only after commit, a rolled-back insert emits nothing, and only subscribed city groups receive the event
 - [X] T069 [P] [US4] Integration test for scheduled refresh in `backend/weather/tests/integration/test_tasks.py`: the task selects at most 10 cities seen in the last 24 hours, skips cities with no recent activity, and tolerates provider errors per city without aborting the batch
 - [X] T070 [P] [US4] Hook test for the socket client in `frontend/src/ws/useWeatherSocket.test.tsx`: exponential backoff with jitter, deduplication by `(city_key, timestamp)`, stale-frame ignoring, and recovery after reconnect
@@ -194,9 +194,9 @@ paused indicator, restart it, and confirm recovery without duplicates.
 ### Implementation for User Story 4
 
 - [X] T071 [US4] Implement `WeatherConsumer` in `backend/weather/consumers.py` and `backend/weather/routing.py`, wiring `ws/weather/` into `backend/config/asgi.py`
-- [X] T072 [US4] Implement subscription handling in `backend/weather/consumers.py`: validate and normalize the two cities, join `weather.{city_key}` per city, send a `snapshot` with the current dashboard payload, emit a `heartbeat` every 25 seconds, answer `ping`, and reject client-authored messages other than `ping`
-- [X] T073 [US4] Implement `backend/weather/signals.py` registered from `backend/weather/apps.py`: on `post_save` for an inserted row, use `transaction.on_commit` to serialize the observation with `ObservationSerializer` and `group_send` it to each city group
-- [X] T074 [US4] Implement `backend/weather/tasks.py` with `refresh_tracked_cities` and add a 60-second beat entry in `backend/config/celery.py`; bound the batch to 10 cities and reuse the provider, insert, cache-invalidation and fan-out path
+- [X] T072 [US4] Implement subscription handling in `backend/weather/consumers.py`: validate and normalize the two cities, join the hashed `channel_group(city.key)` group per city, send a `snapshot` with the current dashboard payload, emit a `heartbeat` every 25 seconds, answer `ping`, and reject client-authored messages other than `ping`
+- [X] T073 [US4] Implement `backend/weather/signals.py` registered from `backend/weather/apps.py`: on `post_save` for an inserted row, use `transaction.on_commit` to serialize the observation, normalize Decimal values to JSON primitives, and `group_send` it to each city's hashed channel group
+- [X] T074 [US4] Implement `backend/weather/tasks.py` with `refresh_tracked_cities` and add a 60-second beat entry in `backend/config/celery.py`; bound the batch to the 10 cities with an observation in the last 24 hours and reuse the provider, insert, cache-invalidation and fan-out path
 - [X] T075 [US4] Implement `frontend/src/ws/useWeatherSocket.ts` with query-parameter subscription, 1–30 second exponential backoff plus 20% jitter, 10-second stability reset, 60-second dead-connection detection, and a `snapshot`-replaces-state strategy
 - [X] T076 [US4] Implement `frontend/src/components/ConnectionBadge.tsx` showing live, paused and reconnecting states with accessible text and no color-only signaling
 - [X] T077 [US4] Integrate socket events with TanStack Query in `frontend/src/hooks/useDashboardData.ts`: merge or invalidate on `observation`, replace on `snapshot`, and refresh the table page when the new row belongs to the current filter
@@ -218,14 +218,14 @@ file plus a notice.
 
 ### Tests for User Story 5 ⚠️
 
-- [X] T080 [P] [US5] Contract test for `GET /weather/export/` in `backend/weather/tests/contract/test_export.py`: attachment header, header row column order `id,city,country_code,temperature_c,humidity_pct,wind_speed_ms,timestamp`, filter and window applied, pagination ignored, and 400 for invalid ranges
+- [X] T080 [P] [US5] Contract test for `GET /weather/export/` in `backend/weather/tests/contract/test_export.py`: attachment header, header row column order `id,city,country_code,temperature_c,humidity_pct,wind_speed_ms,timestamp`, filter and window applied, pagination ignored, `Accept: text/csv` accepted, and 400 for invalid ranges
 - [X] T081 [P] [US5] Unit test for CSV escaping in `backend/weather/tests/unit/test_csv.py`: commas, quotes and newlines are quoted per RFC 4180 and leading `=`, `+`, `-` and `@` are prefixed with a single quote
 - [X] T082 [P] [US5] Component test for the export control in `frontend/src/components/ExportButton.test.tsx`: it sends the active city and window, shows a download state, and displays an empty-export notice on a header-only response
 
 ### Implementation for User Story 5
 
 - [X] T083 [US5] Implement the CSV encoder in `backend/weather/services/csv_export.py` with RFC 4180 quoting, formula-injection prefixing, ISO 8601 UTC timestamps, and a streaming row iterator over a values queryset
-- [X] T084 [US5] Implement `GET /weather/export/` in `backend/weather/views.py` using `StreamingHttpResponse`, the shared filter parsing, a `Content-Disposition` filename, and the export throttle
+- [X] T084 [US5] Implement `GET /weather/export/` in `backend/weather/views.py` using `StreamingHttpResponse`, the shared filter parsing, a `Content-Disposition` filename, the export throttle, and content negotiation that accepts the SPA's `Accept: text/csv` despite the JSON-only default renderer
 - [X] T085 [US5] Implement `frontend/src/components/ExportButton.tsx` in the dashboard toolbar, passing the current filter and window, handling the download, and showing an empty-export notification when the response contains only the header
 - [X] T086 [US5] Add an integration test in `backend/weather/tests/integration/test_export_volume.py` seeding 10,000 rows and asserting the export completes under 10 seconds with a constant memory profile
 - [X] T087 [US5] Run the US5 test subsets (`backend/weather/tests/contract/test_export.py`, `backend/weather/tests/unit/test_csv.py`, `backend/weather/tests/integration/test_export_volume.py`, `frontend/src/components/ExportButton.test.tsx`) and fix failures
@@ -246,9 +246,27 @@ clean-checkout proof.
 - [X] T092 [P] Write `README.md` run instructions and `docs/architecture.md` with the data-flow diagram, cache key/TTL table, and error taxonomy
 - [X] T093 Verify the implementation matches `contracts/openapi.yaml` and `contracts/websocket.md`; update the contracts for any justified drift
 - [X] T094 Run `docker compose exec backend pytest -q`, `docker compose exec backend ruff check .`, `docker compose exec backend mypy weather config`, `docker compose run --rm frontend npm test -- --run`, and `docker compose run --rm frontend npm run typecheck` from the repository root, covering `backend/` and `frontend/`; all must pass
-- [X] T095 Execute quickstart scenarios V1–V7 and record pass/fail evidence in `specs/001-weather-comparison-dashboard/quickstart.md` under a "Validation results" heading
+- [X] T095 Execute quickstart scenarios V1–V7, record the V8 traceability/latency procedure, and record pass/fail evidence in `specs/001-weather-comparison-dashboard/quickstart.md` under a "Validation results" heading
 - [X] T096 Perform the final clean-checkout proof: `docker compose down -v`, `docker compose up`, `scripts/verify-startup.sh`, one comparison, one export, one live-update check
 - [X] T097 Review constitution principles I–VI against the delivered code in `backend/`, `frontend/` and `docker-compose.yml`, and record the compliance notes in the feature pull-request description
+
+---
+
+## Phase 9: Post-Delivery Fixes and Document Alignment
+
+**Purpose**: Record the fixes made after the initial task list and align the workflow artifacts with
+the delivered behavior. These tasks do not change the layered data flow.
+
+- [X] T098 [US1] Default the root view to stored data: `GET /dashboard-data/` without `cities` returns the latest stored pair (zero, one or two), the comparison stays neutral below two cities, and `Dashboard.tsx` reflects the pair in the URL
+- [X] T099 [US1] Resolve city search in the order Redis geocoding cache -> PostgreSQL stored observations -> OpenWeather, retrying `City Country` as `City,Country` and keeping stored cities available without a provider key
+- [X] T100 [US4] Replace raw `weather.{city_key}` group names with the Channels-valid `weather.<sha256(city_key)[:32]>` returned by `weather.realtime.channel_group`, shared by consumer and publisher
+- [X] T101 [US4] Normalize observation payloads to JSON primitives before `group_send` so the msgpack channel layer never receives `Decimal`
+- [X] T102 [US2] Pin `redis==5.2.1` to keep the channels-redis BZPOPMIN timeout compatible
+- [X] T103 [US5] Bypass DRF renderer negotiation for the streaming CSV response so `Accept: text/csv` works
+- [X] T104 [US3] Return HTTP 200 with an empty result set for a page beyond the last page, while keeping 400 for a page below 1 or a non-integer page
+- [X] T105 [All] Ship the Spanish user experience: `lang="es"`, Spanish UI-authored labels, table headers, chart titles, loading/empty/error/stale/reconnecting states, validation notices and accessibility announcements, with English API messages only as technical detail alongside Spanish UI copy
+- [X] T106 [Docs] Align the constitution, spec, plan, tasks, data model, REST/WebSocket contracts, quickstart and architecture/compliance notes with the delivered behavior
+- [X] T107 [Validation] Document the p95 dashboard probe, startup timing and value-traceability audit used to verify SC-001, SC-003 and SC-006
 
 ---
 
@@ -267,10 +285,13 @@ clean-checkout proof.
 - **User Story 5 (Phase 7)**: Depends on Phase 2; reuses the US3 filter parsing and the US1
   dashboard toolbar.
 - **Polish (Phase 8)**: Depends on all completed stories.
+- **Post-Delivery Fixes (Phase 9)**: Depends on the implemented stories; records the default view,
+  search order, channel group hashing, JSON payload normalization, Redis pin, CSV negotiation,
+  out-of-range pagination, Spanish UX and document alignment.
 
 ### Story Completion Order
 
-`Setup → Foundational → US1 → US2 → US3 → US4 → US5 → Polish`
+`Setup → Foundational → US1 → US2 → US3 → US4 → US5 → Polish → Post-Delivery Fixes`
 
 US3, US4 and US5 are mutually independent after US1 and may run in parallel with separate owners.
 US2 is a release gate and SHOULD be completed before external delivery even though US3–US5 can be
@@ -355,4 +376,7 @@ Owner C: Phase 7 (US5 export)
 - Every user story is independently testable; do not defer a story's tests to the polish phase.
 - Commit after each task or small logical group; never mix two stories in one commit.
 - Do not add authentication, unit switching, alerting, or the agent chat in this feature.
+- Repository artifacts are English; every user-facing string is Spanish.
+- Phase 9 records fixes that are already in the delivered code. It does not change the layered data
+  flow, and it does not introduce new product scope.
 - Any scope change requires a microspec amendment before implementation.

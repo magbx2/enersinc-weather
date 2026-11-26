@@ -1,3 +1,7 @@
+> **Historical snapshot.** The current performance notes are
+> [../../docs/performance.md](../../docs/performance.md). This copy predates the post-delivery fixes
+> and is kept only for reference.
+
 # Performance notes
 
 Measured on the development machine with the Compose stack (`postgres` and `redis` containers,

@@ -150,6 +150,15 @@ paths:
         single quote to neutralize spreadsheet formula injection.
       operationId: exportWeather
       parameters:
+        - name: Accept
+          in: header
+          required: false
+          description: >
+            The SPA sends `text/csv`. The view streams its own CSV response and negotiates around
+            the project's JSON-only default renderer.
+          schema:
+            type: string
+            default: text/csv
         - $ref: "#/components/parameters/City"
         - $ref: "#/components/parameters/Start"
         - $ref: "#/components/parameters/End"
@@ -184,8 +193,10 @@ paths:
       summary: Resolve a city name to provider-backed candidates
       description: >
         Resolves in documented order: Redis geocoding cache, PostgreSQL observations already
-        stored, then the provider geocoding service. The credential never reaches the browser.
-        Provider results are cached for 24 hours and misses are cached negatively for 10 minutes.
+        stored, then the provider geocoding service. `City Country` input is retried as
+        `City,Country`. Stored cities remain searchable without a provider key. The credential never
+        reaches the browser. Provider results are cached for 24 hours and misses are cached
+        negatively for 10 minutes.
       operationId: searchCities
       parameters:
         - name: q
@@ -226,6 +237,9 @@ components:
       name: page
       in: query
       required: false
+      description: >
+        1-based page number. A value below 1 or a non-integer is 400
+        `invalid_pagination`; a page beyond the last page returns 200 with an empty `results` array.
       schema:
         type: integer
         minimum: 1
@@ -318,6 +332,7 @@ components:
           example: Region Metropolitana
         provider_city_id:
           type: integer
+          description: Provider identifier used during search only; it is not persisted in observations.
           example: 3871336
 
     CurrentReading:

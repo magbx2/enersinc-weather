@@ -1,3 +1,6 @@
+> **Historical snapshot.** The current architecture is [../../docs/architecture.md](../../docs/architecture.md).
+> This copy predates the post-delivery fixes and is kept only for reference.
+
 # Architecture
 
 ## Data flow

@@ -25,7 +25,9 @@ already stored instead of an empty screen. The SPA then reflects that pair in th
 
 `GET /cities/search/` resolves in the documented order: Redis geocoding cache, PostgreSQL
 observations already stored, then OpenWeather geocoding. Free-form `City Country` input is retried
-as `City,Country` before reaching the provider.
+as `City,Country` before reaching the provider. The refresh path still resolves through the provider
+because `WeatherData` does not persist latitude/longitude; stored rows are a search convenience, not
+a substitute for a live reading.
 
 Scheduled ingestion runs in Celery (`worker` + `beat`). Every insert goes through
 `weather.services.observations.persist_observation`, which:
@@ -63,6 +65,21 @@ the documentation and the quickstart's `redis-cli` commands exactly.
 - Derived values (deltas, buckets) are never stored. Empty chart buckets are omitted, not filled
   with zeroes.
 
+## Language boundary
+
+Repository artifacts, API field names, error codes, log events and developer documentation are
+English. The dashboard is Spanish: `frontend/index.html` declares `lang="es"`, Ant Design is
+configured with the `es_ES` locale, and every UI-authored label, table header, chart title,
+empty/error/stale/reconnecting state and accessibility announcement is Spanish. API `message`
+strings are developer-facing and may appear only as technical detail within an alert whose UI copy
+is Spanish.
+
+## CSV export negotiation
+
+`GET /weather/export/` streams `text/csv` directly. Because the project registers only the JSON
+renderer, the view overrides content negotiation so the SPA's `Accept: text/csv` returns HTTP 200
+instead of 406. The response sets `Content-Disposition: attachment` and `Cache-Control: no-store`.
+
 ## Error taxonomy
 
 Every error uses `{"error": {"code", "message", "details", "request_id"}}`.
@@ -71,8 +88,8 @@ Every error uses `{"error": {"code", "message", "details", "request_id"}}`.
 |---|---|---|
 | `invalid_city` | 400 | Empty, too long, markup or unsupported characters |
 | `duplicate_city` | 400 | Same city twice after normalization |
-| `unknown_city` | 400 | Provider geocoding returns no candidate |
-| `invalid_pagination` | 400 | Non-integer, below 1, or page size outside 1–100 |
+| `unknown_city` | 400 | Refresh resolution: provider geocoding returns no candidate; city search returns an empty list instead |
+| `invalid_pagination` | 400 | Non-integer page, page below 1, or page size outside 1–100; a page beyond the last page is 200 with empty results |
 | `invalid_window` | 400 | Window outside `24h`, `7d`, `30d` |
 | `invalid_range` | 400 | Malformed or reversed `start`/`end` |
 | `provider_unavailable` | 503 | Fallback path when nothing is stored |
@@ -88,7 +105,11 @@ Provider, cache and database failures are logged with distinct `event` values:
 ## WebSocket protocol
 
 `GET /ws/weather/?cities=<a>,<b>` accepts exactly two distinct, known cities and joins
-`weather.{city_key}` per city. The server sends:
+`weather.<sha256(city_key)[:32]>` per city. The hash makes keys such as `new york` or `o'brien`
+valid Channels group names; the consumer and the `post_save` publisher call the same
+`weather.realtime.channel_group` helper. Observation payloads are normalized to JSON primitives
+before `group_send`, because the channel layer uses msgpack and cannot pack `Decimal`. The server
+sends:
 
 - `snapshot` on connect (the full dashboard payload);
 - `observation` after a committed insert, with `source: "live"`;

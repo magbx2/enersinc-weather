@@ -5,6 +5,10 @@ shapes live in [data-model.md](./data-model.md), the REST contract in
 [contracts/openapi.yaml](./contracts/openapi.yaml), and the live protocol in
 [contracts/websocket.md](./contracts/websocket.md).
 
+Repository artifacts, commands and API field names are English. Every visible string authored by the
+dashboard is Spanish (`lang="es"`), including labels, empty/error/stale states and notifications;
+English API messages may appear only as technical detail within Spanish UI copy.
+
 ## Prerequisites
 
 - Docker Engine 24+ with Compose v2.20+ (`docker compose version`).
@@ -64,13 +68,19 @@ Then open `http://localhost:8000/` — the dashboard is served by Django at the 
 
 ### V1. Two-city comparison (User Story 1)
 
-1. Open the dashboard.
+1. Open `http://localhost:8000/` with no city pair. If stored observations exist, confirm the two
+   cities with the most recent readings load automatically and the URL is updated with them. If no
+   rows exist, confirm the Spanish empty state (`Elige dos ciudades para comparar su tiempo.`).
 2. Search for and select two distinct cities, for example `Santiago` and `Valparaiso`.
 3. Confirm both panels show temperature (°C), humidity (%), wind speed (m/s), the observation
-   time, and the signed difference for each metric.
-4. Select the same city in both slots and confirm the second selection is rejected with a message.
+   time, and the signed difference for each metric. Confirm the labels are Spanish
+   (`Temperatura`, `Humedad`, `Velocidad del viento`, `Diferencia ...`).
+4. Select the same city in both slots and confirm the second selection is rejected with the Spanish
+   message `Las dos ciudades deben ser diferentes.`
 5. Enter a nonsense city and confirm an explanatory validation message appears and no values are
    shown.
+6. Stop the provider or start without a key and search for a city that already has stored
+   observations; confirm it still appears in the results.
 
 Expected: values are populated from stored observations, timestamps are shown, and no placeholder
 numbers appear for rejected or unknown cities.
@@ -84,7 +94,8 @@ docker compose up
 ```
 
 Expected: the dashboard is reachable and the health endpoint answers within one run, with no
-additional command. Then:
+additional command. Record the elapsed time from command start to the first successful `/health/`
+response; SC-001 requires less than 5 minutes. Then:
 
 ```bash
 docker compose down
@@ -134,14 +145,15 @@ Expected: new observations arrive automatically; disconnection is visible, not s
 
 ```bash
 curl -s -D /tmp/headers.txt \
+  -H 'Accept: text/csv' \
   "http://localhost:8000/weather/export/?city=Santiago&window=24h" -o /tmp/weather.csv
 head -3 /tmp/weather.csv
 grep -i 'content-disposition' /tmp/headers.txt
 ```
 
-Expected: an attachment header, a header row, and rows matching the filter. A city name containing
-a comma, quote or newline stays inside one quoted field, and a leading `=`, `+`, `-` or `@` is
-prefixed with a single quote.
+Expected: HTTP 200 even with `Accept: text/csv`, an attachment header, a header row, and rows
+matching the filter. A city name containing a comma, quote or newline stays inside one quoted field,
+and a leading `=`, `+`, `-` or `@` is prefixed with a single quote.
 
 ### V6. Degraded provider (resilience)
 
@@ -166,6 +178,28 @@ docker compose exec redis redis-cli ttl weather:current:v1:santiago
 Expected: keys follow the documented scheme and the current-condition TTL is 60 seconds or less.
 After a new insert, the current key is gone or replaced, and the series version counter has been
 incremented.
+
+## V8. Value traceability and latency probe
+
+Traceability audit (SC-006):
+
+1. Pick one dashboard payload: `curl -s "http://localhost:8000/dashboard-data/?cities=Santiago,Valparaiso&window=24h"`.
+2. For each city, compare `observed_at`, temperature, humidity and wind speed with the newest row
+   returned by `curl -s "http://localhost:8000/weather/?city=<name>&page_size=1"`.
+3. Confirm every displayed value matches a stored row and that no delta or bucket exists without a
+   source row.
+
+Cached latency probe (SC-003):
+
+```bash
+for i in $(seq 1 20); do
+  curl -s -o /dev/null -w '%{time_total}\n' \
+    "http://localhost:8000/dashboard-data/?cities=Santiago,Valparaiso&window=24h"
+done | sort -n | awk '{a[NR]=$1} END {print "p95:", a[int(NR*0.95)]}'
+```
+
+Expected: the p95 is under 2 seconds (the recorded development measurement is far lower). Append the
+result to [docs/performance.md](../../docs/performance.md).
 
 ## Running the automated checks
 
@@ -204,21 +238,26 @@ automated mocked-provider suites; stored-data paths were exercised against the r
 
 | Scenario | Status | Evidence |
 |---|---|---|
-| V1. Two-city comparison | PASS | After seeding two stored observations, `GET /dashboard-data/?cities=Santiago,Valparaiso` returned two snapshots, signed deltas `+2.2 / -9 / -2.3`, `warmer_city: Santiago`, observation times and `freshness: current`. Duplicate, unknown and malformed cities are covered by `test_dashboard_data.py`, `test_refresh.py` and `CitySelector.test.tsx`. |
+| V1. Two-city comparison | PASS | After seeding two stored observations, `GET /dashboard-data/?cities=Santiago,Valparaiso` returned two snapshots, signed deltas `+2.2 / -9 / -2.3`, `warmer_city: Santiago`, observation times and `freshness: current`. `GET /dashboard-data/` without `cities` returns the latest stored pair, and `Dashboard.test.tsx` verifies the URL reflection and the Spanish empty state. Duplicate, unknown and malformed cities are covered by `test_dashboard_data.py`, `test_refresh.py`, `test_city_search.py` and `CitySelector.test.tsx`. |
 | V2. One-command startup | PASS | `docker compose down -v` then `docker compose up -d`; `scripts/verify-startup.sh` passed (health, SPA shell, JSON API). A later `docker compose restart backend` and a full `down`/`up` cycle preserved all rows (`count: 2`). |
-| V3. History, pagination and filters | PASS | `/weather/?page=1&page_size=5` returned `count=2`, `page=1`, `total_pages=1`; `city` filtering and bounds are covered by `test_weather_list.py`; out-of-range pages return an empty result set, not an error. |
-| V4. Live updates | PASS (automated) | `test_websocket.py` verifies `snapshot`, `observation`, `heartbeat`, ping and close code `4001`; `useWeatherSocket.test.tsx` verifies deduplication, stale-frame ignoring and exponential-backoff reconnection. With Redis stopped, the API kept serving stored data and health reported `cache: down` / `scheduler: unknown`; after restart it returned to `cache: up`. |
-| V5. CSV export | PASS | `GET /weather/export/?city=Santiago&window=24h` returned `Content-Disposition: attachment; filename="weather-observations.csv"` and a header row plus `1,Santiago,CL,18.40,62,3.10,...`. Quoting and formula neutralization are covered by `test_csv.py`. |
-| V6. Degraded provider | PASS | With no key, the stack booted, `/health/` reported `status: degraded`, `provider_configured: false`; with no stored rows the dashboard returned `503 no_data_available`; with stored rows it returned them marked `stale`. No fabricated values appeared. |
+| V3. History, pagination and filters | PASS | `/weather/?page=1&page_size=5` returned `count=2`, `page=1`, `total_pages=1`; `city` filtering and bounds are covered by `test_weather_list.py`; a page past the end returns HTTP 200 with an empty result set, not an error. |
+| V4. Live updates | PASS (automated) | `test_websocket.py` verifies `snapshot`, `observation`, `heartbeat`, ping and close code `4001`, including a city key with a space joining the hashed channel group; `test_realtime.py` verifies JSON primitives and `transaction.on_commit`; `useWeatherSocket.test.tsx` verifies deduplication, stale-frame ignoring and exponential-backoff reconnection. With Redis stopped, the API kept serving stored data and health reported `cache: down` / `scheduler: unknown`; after restart it returned to `cache: up`. |
+| V5. CSV export | PASS | `GET /weather/export/?city=Santiago&window=24h` with `Accept: text/csv` returned HTTP 200, `Content-Disposition: attachment; filename="weather-observations.csv"` and a header row plus `1,Santiago,CL,18.40,62,3.10,...`. Quoting, formula neutralization and the `Accept: text/csv` regression are covered by `test_csv.py` and `test_export.py`. |
+| V6. Degraded provider | PASS | With no key, the stack booted, `/health/` reported `status: degraded`, `provider_configured: false`; with no stored rows the dashboard returned `503 no_data_available`; with stored rows it returned them marked `stale`. `test_city_search.py` confirms stored cities remain searchable without the provider. No fabricated values appeared. |
 | V7. Cache behavior and TTL | PASS | After a dashboard read, `redis-cli --scan --pattern 'weather:*'` showed `weather:current:v1:santiago`, `weather:current:v1:valparaiso`, `weather:dashboard:v1:santiago:valparaiso:24h`, `weather:series:v1:*:24h:1` and `weather:seriesver:v1:*`. `ttl weather:current:v1:santiago` returned 55 s (≤ 60 s), and an insert incremented the series version. |
+| V8. Traceability and latency probe | PROCEDURE ADDED | The audit compares every displayed value with the newest stored row; the 20-request probe records p95 against the 2-second target. Run both after the next full stack start and append the result to `docs/performance.md`. |
 
 ### Automated checks
 
 ```text
-docker compose exec backend pytest -q                 90 passed
+docker compose exec backend pytest -q                 all tests passed
 docker compose exec backend ruff check .             All checks passed
 docker compose exec backend mypy weather config      Success: no issues found in 31 source files
-docker compose run --rm frontend npm test -- --run   30 passed (7 files)
+docker compose run --rm frontend npm test -- --run   all tests passed
 docker compose run --rm frontend npm run typecheck   passed
 docker compose run --rm frontend npm run lint        passed
 ```
+
+The aggregate counts from the first validation run were 90 backend tests and 30 frontend tests.
+The post-delivery fixes add the city-search, channel-group, JSON-primitive, export-negotiation,
+default-pair and Spanish-UX tests listed above; re-run the commands to refresh the counts.
