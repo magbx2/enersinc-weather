@@ -79,6 +79,7 @@ export interface Health {
   cache: "up" | "down";
   provider_configured: boolean;
   scheduler: "up" | "unknown";
+  llm?: { configured: boolean; model: string | null };
   version: string;
 }
 

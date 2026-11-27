@@ -1,8 +1,19 @@
 import { http, HttpResponse } from "msw";
 
-import { candidates, dashboardFixture, observationsFixture } from "../fixtures";
+import { candidates, chatTurnFor, dashboardFixture, observationsFixture } from "../fixtures";
 
 export const handlers = [
+  http.get("*/health/", () =>
+    HttpResponse.json({
+      status: "ok",
+      database: "up",
+      cache: "up",
+      provider_configured: true,
+      scheduler: "up",
+      llm: { configured: true, model: "gpt-4o-mini" },
+      version: "1.0.0",
+    }),
+  ),
   http.get("*/dashboard-data/", () => HttpResponse.json(dashboardFixture)),
   http.post("*/weather/refresh/", () => HttpResponse.json(dashboardFixture)),
   http.get("*/cities/search/", ({ request }) => {
@@ -19,4 +30,12 @@ export const handlers = [
     ),
   ),
   http.get("*/weather/", () => HttpResponse.json(observationsFixture)),
+  http.get("*/chat/messages/", ({ request }) => {
+    const sessionId = new URL(request.url).searchParams.get("session_id") ?? "";
+    return HttpResponse.json({ session_id: sessionId, messages: [] });
+  }),
+  http.post("*/chat/messages/", async ({ request }) => {
+    const body = (await request.json()) as { session_id: string; message: string };
+    return HttpResponse.json(chatTurnFor(body.session_id));
+  }),
 ];

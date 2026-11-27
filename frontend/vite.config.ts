@@ -16,6 +16,7 @@ export default defineConfig({
       "/dashboard-data": "http://localhost:8000",
       "/weather": "http://localhost:8000",
       "/cities": "http://localhost:8000",
+      "/chat": "http://localhost:8000",
       "/health": "http://localhost:8000",
       "/ws": { target: "ws://localhost:8000", ws: true },
     },

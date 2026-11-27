@@ -44,6 +44,29 @@ curl -s http://localhost:8000/health/ | jq
 - Celery worker/beat ingesting recently active cities every minute.
 - Stored-default root view and city search that falls back from Redis to PostgreSQL to the provider.
 - Spanish dashboard copy (`lang="es"`) while the repository and contracts stay English.
+- A weather data assistant panel (FAB + history + tool evidence) over the stored history, powered
+  by a configurable LiteLLM model with two typed backend tools.
+
+## Weather data assistant
+
+Click the floating chat button (bottom-right) to ask questions in Spanish about stored history, for
+example `¿Cuál fue la temperatura promedio en Santiago en los últimos 7 días?`. The browser only
+talks to Django; the backend runs a bounded LiteLLM tool loop over `consultar_clima` and
+`calcular_estadistica`. Both tools validate their arguments, read PostgreSQL with the ORM and return
+evidence (city, applied range, sample count). Arithmetic happens in the database, never in the
+model. Conversations, messages and sanitized tool runs are persisted per session, so reloading the
+page restores the same history and tool log.
+
+Set `LLM_MODEL` (any LiteLLM model identifier) and a provider key to enable it:
+
+```dotenv
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=YOUR_KEY
+```
+
+Changing `LLM_MODEL` to another provider requires no code change. With no key, the stack still
+boots and the panel shows a safe Spanish "no configurado" state. See
+[specs/002-weather-data-chat/quickstart.md](specs/002-weather-data-chat/quickstart.md).
 
 ## Architecture at a glance
 
@@ -103,6 +126,12 @@ docs/         Architecture and performance notes
 | `DJANGO_DEBUG` | `false` | Debug pages are never on by default |
 | `BACKEND_PORT` | `8000` | Published host port |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1,backend` | Hosts accepted by Django and Channels |
+| `LLM_MODEL` | `gpt-4o-mini` | Any LiteLLM model identifier; changing it changes provider/model |
+| `LLM_API_KEY` | empty | Provider key; empty is a supported degraded chat mode |
+| `LLM_API_BASE` | empty | Optional OpenAI-compatible gateway |
+| `LLM_TIMEOUT_SECONDS` | `30` | Per-call model timeout |
+| `LLM_MAX_TOOL_ROUNDS` | `4` | Bound on tool calls per chat turn |
+| `THROTTLE_CHAT` | `12/min` | Chat turns accepted per client |
 
 ## Behavior under failure
 
@@ -114,6 +143,8 @@ docs/         Architecture and performance notes
 | Redis down | Requests still succeed from PostgreSQL; cache errors are logged as `cache_error` |
 | No rows at all and provider unavailable | `503` with `no_data_available`; the UI shows an explicit empty state |
 | WebSocket dropped | Client reconnects with exponential backoff and jitter; snapshot removes gaps |
+| LLM key missing or invalid | Stack stays healthy; the chat panel shows a safe Spanish failure state and weather features are unaffected |
+| LLM provider slow or failing | The turn is classified as `llm_unavailable`; no provider body or secret is stored or shown |
 
 `docker compose down` preserves data in `pg_data`, `redis_data` and `spa_dist`.
 `docker compose down -v` is the only destructive variant.

@@ -143,10 +143,53 @@ spreadsheet tool to confirm the rows and columns match the on-screen selection.
 
 ---
 
-### Edge Cases
+## Clarifications
+
+**Session 2026-11-26**
+
+- Q: How should the dashboard visually indicate that a reading is stale (exceeds the 60-second freshness window)?
+  A: All of the above - combining "Stale" text badge, grayed-out appearance with age tooltip, and "Last updated: [time]" timestamp display provides the clearest communication of freshness status.
+- Q: How should the CSV export handle city names or values that contain commas, quotes, or newlines?
+  A: RFC 4180 standard quoting: wrap fields in double quotes and double any internal double quotes. This is the most interoperable approach and aligns with the project constitution's RFC 4180 quoting requirement (Principle V).
+- Q: How should the dashboard display the live connection state to the user?
+  A: "Live" / "Offline" badge with color coding (green/orange-red) providing immediate status awareness, complying with Spanish UI requirements (FR-027).
+- Q: What content should the dashboard show in the empty state when no city pair has been stored yet?
+  A: "No ciudades seleccionadas aún. Buscar una ciudad para comenzar." - concise, action-oriented, compliant with Spanish UI requirements (FR-027).
+- Q: What columns should the CSV export header row contain, and in what order?
+  A: `city, temperature, humidity, wind speed, measurement time, row identifier` - follows entity definition order includes stable row reference for diagnostics.
+
+## Edge Cases
 
 - The external weather source is slow, unavailable, rate-limited, or rejects the credential: the
   dashboard MUST keep working with the most recent stored data and MUST label it as not current.
+- Two identical cities are selected: the system MUST reject the selection with a clear message.
+- A city name is empty, excessively long, contains markup, or contains characters intended to break
+  a query: the system MUST reject it with a clear validation message and MUST NOT echo it unsafely.
+- No observations exist at all (first run): the dashboard MUST show an instructive empty state, not
+  blank panels or fabricated zeroes.
+- A selected city has current conditions available but no history yet: the current comparison MUST
+  render and the history area MUST explain that no history is stored yet.
+- Only one of the two cities has data: the dashboard MUST show the available side and mark the other
+  as unavailable rather than imitating a value.
+- The cache layer is unavailable while storage is healthy: requests MUST still succeed by reading
+  stored data, without user-visible failure.
+- The live connection is lost and restored repeatedly: updates MUST resume without duplicated rows.
+- The system is restarted while the browser page is open: stored data MUST remain and the page MUST
+  recover its live connection.
+- Very large histories or very wide date ranges are requested: the interface MUST remain responsive
+  and MUST bound the amount of data returned per request.
+- The browser is narrow (down to 360 pixels wide): all dashboard areas MUST remain usable without
+  losing controls or overlapping content.
+- The dashboard root is opened with no pair and no stored observations: the system MUST show an
+  instructive empty state and MUST NOT call the provider until the visitor asks for a refresh.
+- The provider is unavailable but stored observations exist for a searched city: search MUST return
+  those stored cities so the visitor can still build a comparison from history.
+- Two cities share a name but belong to different countries: the name-based identity is documented
+  as a limitation, and the interface MUST show the stored country code for each reading instead of
+  implying that both rows belong to the same known country.
+- A visitor requests a page beyond the last page: the system MUST return an empty result set with
+  HTTP 200, not an error.
+- **Readings exceeding the 60-second freshness window MUST be indicated using all of the following complementary visual cues: a "Stale" text badge over the value, a grayed-out appearance, and a "Last updated: [time]" timestamp display.**
 - Two identical cities are selected: the system MUST reject the selection with a clear message.
 - A city name is empty, excessively long, contains markup, or contains characters intended to break
   a query: the system MUST reject it with a clear validation message and MUST NOT echo it unsafely.

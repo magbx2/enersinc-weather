@@ -17,6 +17,30 @@ Django REST Framework / Channels consumer
   └─▶ OpenWeather geocoding + current weather (5 s timeout, 2 retries)
 ```
 
+## Chat assistant
+
+The SPA posts a question to `/chat/messages/`; it never contacts a model provider. Django runs a
+bounded LiteLLM tool loop (at most `LLM_MAX_TOOL_ROUNDS`) over two backend-owned tools:
+`consultar_clima` (stored rows) and `calcular_estadistica` (ORM `Avg`/`Min`/`Max`). Tool arguments
+are validated before any query, only `WeatherData` is read through the ORM, and every result carries
+`evidence` with the matched city, effective UTC range and sample count. The model receives only that
+evidence and is instructed to answer in Spanish without inventing or computing values.
+
+```text
+React ChatPanel ──▶ POST /chat/messages/ ──▶ Django
+                                                ├─▶ LiteLLM (model from LLM_MODEL)
+                                                │      └─▶ tool schemas
+                                                ├─▶ typed tools ──▶ PostgreSQL (read-only)
+                                                └─▶ ChatSession / ChatMessage / ToolRun
+```
+
+Two failures are safe and visible: `llm_not_configured` when no model credential is available and
+`llm_unavailable` for provider errors. Tool/LLM failures are persisted with the assistant message,
+but provider payloads and secrets are never stored. Tool arguments and outputs pass through
+recursive redaction before persistence. Chat reads bypass the weather cache, so no TTL table entry
+is added.
+
+
 ## Default comparison and city search
 
 `GET /dashboard-data/` without `cities` reads PostgreSQL and returns the two cities with the most

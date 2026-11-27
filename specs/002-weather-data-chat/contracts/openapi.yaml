@@ -1,0 +1,122 @@
+openapi: 3.1.0
+info:
+  title: Weather Data Chat API
+  version: 1.0.0
+  description: >
+    Chat over stored weather observations. The browser talks only to this same-origin API;
+    LLM credentials and provider calls stay server-side.
+servers:
+  - url: /
+paths:
+  /chat/messages/:
+    get:
+      summary: Read persisted chat history for a session
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Latest messages, oldest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/History" }
+        "400":
+          description: Invalid or missing session id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      summary: Send a user message and run the assistant
+      description: >
+        JSON only, same-origin. Runs a bounded LiteLLM tool loop over consultar_clima and
+        calcular_estadistica and persists the user message, assistant message and tool runs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [message]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                  description: Client-generated session id; a new one is returned when omitted.
+                message:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        "200":
+          description: The persisted assistant turn
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Turn" }
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Cross-origin request rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Throttled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, request_id]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+            request_id: { type: string }
+    ToolRun:
+      type: object
+      required: [name, arguments, output, status]
+      properties:
+        name: { type: string, enum: [consultar_clima, calcular_estadistica] }
+        arguments: { type: object, additionalProperties: true }
+        output: { type: object, additionalProperties: true }
+        status: { type: string, enum: [ok, error] }
+        error_code: { type: [string, "null"] }
+    Message:
+      type: object
+      required: [id, role, content, status, created_at, tool_runs]
+      properties:
+        id: { type: integer }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        status: { type: string, enum: [completed, failed] }
+        error_code: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        tool_runs:
+          type: array
+          items: { $ref: "#/components/schemas/ToolRun" }
+    Turn:
+      type: object
+      required: [session_id, message]
+      properties:
+        session_id: { type: string, format: uuid }
+        message: { $ref: "#/components/schemas/Message" }
+    History:
+      type: object
+      required: [session_id, messages]
+      properties:
+        session_id: { type: string, format: uuid }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/Message" }

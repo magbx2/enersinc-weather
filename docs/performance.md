@@ -13,6 +13,8 @@ automated tests and in the quickstart V8 probes.
 | 10,000-row CSV export | < 10 s | covered by `test_export_volume.py` (streaming, flat memory) | `weather/tests/integration/test_export_volume.py` |
 | New observation fan-out | < 5 s | immediate after commit; heartbeat 25 s | `test_realtime.py`, `test_websocket.py` |
 | Table page change | < 1 s | single indexed `LIMIT/OFFSET` query | `(city_key, -timestamp)` index |
+| Chat panel open | < 2 s (SC-002) | bundle already loaded; history is one indexed query | `GET /chat/messages/`; no new frontend dependency |
+| Chat turn | < 10 s (SC-001) | dominated by the model call; tools use the existing timestamp indexes | bounded at `LLM_MAX_TOOL_ROUNDS`; tests drive a fake model |
 
 ## Query shape
 
