@@ -18,6 +18,8 @@ services:
   # HTTP + WebSockets + SPA serving (same image as local docker-compose).
   - type: web
     name: weather-backend
+    runtime: docker
+    plan: free
     dockerfilePath: ./Dockerfile.render
     healthCheckPath: /health/
     # Render injects PORT and expects the process to bind to it.
@@ -63,6 +65,8 @@ services:
   # Celery worker: fetches weather readings on demand.
   - type: worker
     name: weather-worker
+    runtime: docker
+    plan: starter
     dockerfilePath: ./Dockerfile.render
     startCommand: celery -A config worker --loglevel=info
     envVars: *backend_env
@@ -70,6 +74,8 @@ services:
   # Celery beat: schedules refresh_tracked_cities every minute.
   - type: worker
     name: weather-beat
+    runtime: docker
+    plan: starter
     dockerfilePath: ./Dockerfile.render
     startCommand: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     envVars: *backend_env
