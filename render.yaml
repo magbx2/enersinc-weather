@@ -1,0 +1,81 @@
+# Render Blueprint: creates the full weather-dashboard stack in one deploy.
+# Usage: Render dashboard -> New -> Blueprint -> select this repository.
+# Render reads this file and provisions every service below automatically,
+# so no service has to be created manually in the UI.
+#
+# Notes:
+# - worker and beat are Background Workers (paid Starter plan on Render).
+# - The free Postgres plan expires after 30 days; upgrade or bring your own.
+# - Key Value (Redis) has no free plan; to use a free managed Redis instead
+#   (e.g. Upstash), remove the weather-redis database below and set REDIS_URL
+#   to the external URL in each service.
+
+databases:
+  - name: weather-db
+    type: postgres
+    plan: free
+  - name: weather-redis
+    type: keyvalue
+    plan: starter
+
+envVarsShared: &backend_env
+  - key: DJANGO_SETTINGS_MODULE
+    value: config.settings
+  - key: DJANGO_SECRET_KEY
+    generateValue: true
+  - key: DJANGO_DEBUG
+    value: "false"
+  # Leading dot matches every subdomain Render assigns (*.onrender.com).
+  # Replace with your custom domain when you have one.
+  - key: ALLOWED_HOSTS
+    value: ".onrender.com"
+  - key: DATABASE_URL
+    fromDatabase:
+      name: weather-db
+      property: connectionString
+  - key: REDIS_URL
+    fromDatabase:
+      name: weather-redis
+      property: connectionString
+  - key: OPENWEATHER_BASE_URL
+    value: https://api.openweathermap.org
+  # Set these two in the Render dashboard after the first deploy
+  # (sync: false marks them as "required, filled manually").
+  - key: OPENWEATHER_API_KEY
+    sync: false
+  - key: LLM_MODEL
+    value: gpt-4o-mini
+  - key: LLM_API_KEY
+    sync: false
+  - key: LLM_API_BASE
+    sync: false
+  - key: THROTTLE_REFRESH
+    value: 30/min
+  - key: THROTTLE_EXPORT
+    value: 20/min
+  - key: THROTTLE_CHAT
+    value: 12/min
+
+services:
+  # HTTP + WebSockets + SPA serving (same image as local docker-compose).
+  - type: web
+    name: weather-backend
+    dockerfilePath: ./Dockerfile.render
+    healthCheckPath: /health/
+    # Render injects PORT and expects the process to bind to it.
+    startCommand: daphne -b 0.0.0.0 -p $PORT config.asgi:application
+    envVars: *backend_env
+
+  # Celery worker: fetches weather readings on demand.
+  - type: worker
+    name: weather-worker
+    dockerfilePath: ./Dockerfile.render
+    startCommand: celery -A config worker --loglevel=info
+    envVars: *backend_env
+
+  # Celery beat: schedules refresh_tracked_cities every minute.
+  - type: worker
+    name: weather-beat
+    dockerfilePath: ./Dockerfile.render
+    startCommand: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    envVars: *backend_env

@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+# All-in-one image for Render. Render cannot share a named volume between
+# service builds like docker-compose does with spa_dist, so this multi-stage
+# build compiles the SPA and bakes it into the backend image, preserving the
+# local contract: Django serves the SPA from /app/spa_dist (build marker
+# included) via collectstatic + WhiteNoise.
+
+FROM node:20-alpine AS frontend
+
+WORKDIR /spa
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build && touch dist/.build-complete
+
+FROM python:3.12-slim AS backend
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/app/.venv/bin:${PATH}"
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/ .
+RUN python -m venv /app/.venv \
+    && pip install --upgrade pip \
+    && pip install "." \
+    && chmod +x entrypoint.sh \
+    && addgroup --system app \
+    && adduser --system --ingroup app app \
+    && mkdir -p /app/staticfiles \
+    && chown -R app:app /app
+
+COPY --from=frontend --chown=app:app /spa/dist /app/spa_dist
+
+USER app
+EXPOSE 8000
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
