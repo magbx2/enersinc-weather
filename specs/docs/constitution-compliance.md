@@ -1,3 +1,7 @@
+> **Historical snapshot.** The current compliance review is
+> [../../docs/constitution-compliance.md](../../docs/constitution-compliance.md). This copy predates
+> constitution v1.2.0 and is kept only for reference.
+
 # Constitution compliance review
 
 Reviewed against `.specify/memory/constitution.md` v1.1.0 for the delivered code in `backend/`,

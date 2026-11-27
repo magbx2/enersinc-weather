@@ -16,7 +16,11 @@ The endpoint accepts no request body and no client-authored data beyond the quer
   each, distinct after normalization.
 - Names are normalized with the same rules as the REST API; unknown names are rejected.
 - Invalid input closes the socket with code `4001` and an `error` frame.
-- Group membership is one group per city: `weather.{city_key}`.
+- Group membership is one group per city, named
+  `weather.<sha256(city_key)[:32]>` by `weather.realtime.channel_group`. The hash keeps keys with
+  spaces or apostrophes valid for Channels; consumer and publisher MUST use the same function.
+- Observation payloads MUST be JSON primitives before `group_send`; `Decimal` values are converted to
+  `float` so the msgpack channel layer can pack them.
 - A connection is removed from all groups on disconnect; no cleanup job is required.
 
 ## Message envelope

@@ -6,7 +6,9 @@ The persisted model is deliberately small: a single append-only table of weather
 Current comparisons, charts, and CSV exports are all derived from this table, so every displayed
 number can be traced to a stored row. There is no separate `City` table; city identity is
 denormalized into each observation, and a normalized `city_key` provides stable filtering and
-indexing.
+indexing. The provider's numeric city identifier is available only while searching (`CityCandidate`)
+and is not persisted, so two same-named cities in different countries share a `city_key` in this
+delivery.
 
 ## Entity: WeatherData
 
@@ -14,10 +16,10 @@ One recorded reading for one city at one provider timestamp.
 
 | Field | Type | Null | Default | Notes |
 |---|---|---|---|---|
-| `id` | bigint, identity, PK | no | auto | Surrogate key; never exposed as a user-facing identifier |
+| `id` | bigint, identity, PK | no | auto | Surrogate key used for diagnostics and as the stable row reference in CSV exports; not a user-facing city identifier |
 | `city` | varchar(120) | no | — | Display name exactly as resolved by the provider, e.g. `Santiago` |
 | `city_key` | varchar(120) | no | — | Normalized key: lowercase, trimmed, internal whitespace collapsed, diacritics folded; used by filters and cache keys |
-| `country_code` | char(2) | yes | `null` | ISO 3166-1 alpha-2, used to disambiguate same-named cities |
+| `country_code` | char(2) | yes | `null` | ISO 3166-1 alpha-2, displayed with the reading; it does not participate in the `city_key` uniqueness key |
 | `temperature` | numeric(5,2) | no | — | Degrees Celsius |
 | `humidity` | smallint | no | — | Relative humidity percentage |
 | `wind_speed` | numeric(5,2) | no | — | Meters per second |
@@ -51,6 +53,9 @@ One recorded reading for one city at one provider timestamp.
 - `humidity`, `temperature`, `wind_speed` must be finite numbers; `NaN` and `Infinity` are rejected.
 - `timestamp` must be within the last 24 hours and no more than 10 minutes in the future.
 - Two selected cities must be distinct after normalization; otherwise 400 `code: "duplicate_city"`.
+- `uq_weather_city_timestamp` is scoped to `(city_key, timestamp)` only. `country_code` is kept for
+  display and diagnostics but does not participate in the uniqueness key, so same-name cities in
+  different countries are not separated.
 
 ### Lifecycle
 
@@ -62,6 +67,8 @@ machine. Retention is indefinite per the spec's assumptions; no pruning job exis
 | Structure | Composition | Rebuild source |
 |---|---|---|
 | Current reading | Newest `WeatherData` row per city, wrapped with `source` (`live`/`stale`) and `age_seconds` | Cache `weather:current:v1:{city_key}`, else database |
+| Search candidate | `name`, `city_key`, `country_code`, `state`, `provider_city_id` | Redis geocoding cache, else stored cities, else OpenWeather geocoding |
+| Default comparison pair | The two cities with the most recent stored observation, newest first (zero, one or two) | PostgreSQL `MAX(timestamp)` per `city_key` |
 | Series point | `bucket_start`, `temperature_avg`, `humidity_avg`, `wind_speed_avg`, `sample_count` | `date_trunc` aggregate over `WeatherData` filtered by window |
 | Comparison summary | Per-metric absolute and signed difference between the two latest readings | Two current readings |
 | Freshness status | `current` when `age_seconds <= 60`, otherwise `stale`; `unavailable` when no row exists | Observation timestamp vs server clock |

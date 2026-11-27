@@ -66,6 +66,51 @@ class RefreshRequestSerializer(serializers.Serializer):
         return [city.name for city in normalized]
 
 
+class ChatRequestSerializer(serializers.Serializer):
+    session_id = serializers.UUIDField(required=False)
+    message = serializers.CharField(
+        max_length=2000, allow_blank=False, trim_whitespace=True
+    )
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        if not isinstance(data, dict):
+            raise ApiError("invalid_chat", "Request body must be a JSON object.")
+        unknown = set(data) - set(self.fields)
+        if unknown:
+            raise ApiError(
+                "invalid_chat",
+                "Request body contains unknown fields.",
+                details={"unknown_fields": sorted(unknown)},
+            )
+        return super().to_internal_value(data)
+
+
+def _iso_timestamp(value: Any) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def chat_message_payload(message: Any) -> dict[str, Any]:
+    """Serialize a persisted message and its sanitized tool runs."""
+    return {
+        "id": message.id,
+        "role": message.role,
+        "content": message.content,
+        "status": message.status,
+        "error_code": message.error_code,
+        "created_at": _iso_timestamp(message.created_at),
+        "tool_runs": [
+            {
+                "name": run.name,
+                "arguments": run.arguments,
+                "output": run.output,
+                "status": run.status,
+                "error_code": run.error_code,
+            }
+            for run in message.tool_runs.all()
+        ],
+    }
+
+
 class CityCandidateSerializer(serializers.Serializer):
     name = serializers.CharField()
     city_key = serializers.CharField()

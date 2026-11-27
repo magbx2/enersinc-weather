@@ -1,3 +1,4 @@
+import type { ChatMessage, ChatTurn } from "../types/chat";
 import type {
   CityCandidate,
   CitySnapshot,
@@ -119,3 +120,41 @@ export const candidates: CityCandidate[] = [
     provider_city_id: 3871336,
   },
 ];
+
+export const chatMessages: ChatMessage[] = [
+  {
+    id: 1,
+    role: "user",
+    content: "¿Cuál fue la temperatura promedio en Santiago?",
+    status: "completed",
+    error_code: null,
+    created_at: "2026-11-26T12:00:00Z",
+    tool_runs: [],
+  },
+  {
+    id: 2,
+    role: "assistant",
+    content: "El promedio fue de 18,6 °C sobre 24 observaciones en Santiago.",
+    status: "completed",
+    error_code: null,
+    created_at: "2026-11-26T12:00:05Z",
+    tool_runs: [
+      {
+        name: "calcular_estadistica",
+        arguments: { city: "Santiago", metric: "temperature", statistic: "average" },
+        output: { ok: true, value: 18.6, sample_count: 24 },
+        status: "ok",
+        error_code: null,
+      },
+    ],
+  },
+];
+
+export const chatTurnFixture: ChatTurn = {
+  session_id: "00000000-0000-4000-8000-000000000000",
+  message: chatMessages[1],
+};
+
+export function chatTurnFor(sessionId: string): ChatTurn {
+  return { session_id: sessionId, message: { ...chatMessages[1], id: 2 } };
+}

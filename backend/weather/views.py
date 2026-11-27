@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 
 from django.conf import settings
@@ -21,13 +22,16 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from weather.chat.agent import llm_status, run_chat_turn
 from weather.errors import ApiError, envelope
-from weather.models import WeatherData
+from weather.models import ChatMessage, ChatSession, WeatherData
 from weather.pagination import WeatherPagination, parse_filters, resolve_range
 from weather.serializers import (
+    ChatRequestSerializer,
     CityCandidateSerializer,
     ObservationSerializer,
     RefreshRequestSerializer,
+    chat_message_payload,
 )
 from weather.services.cities import normalize_pair, parse_cities_query, search_candidates
 from weather.services.csv_export import rows_from_queryset
@@ -76,6 +80,7 @@ def health(_request: HttpRequest) -> JsonResponse:
         "cache": cache_status,
         "provider_configured": provider_configured,
         "scheduler": "up" if cache_status == "up" else "unknown",
+        "llm": llm_status(),
         "version": SERVICE_VERSION,
     }
     if overall == "down":
@@ -225,6 +230,59 @@ class ExportView(APIView):
         response["Content-Disposition"] = 'attachment; filename="weather-observations.csv"'
         response["Cache-Control"] = "no-store"
         return response
+
+
+# --- Chat assistant ---------------------------------------------------------------
+
+
+class ChatMessagesView(APIView):
+    """Persisted chat history and the assistant turn endpoint."""
+
+    throttle_scope = "chat"
+
+    def get(self, request):
+        raw = request.query_params.get("session_id")
+        if not raw:
+            raise ApiError("invalid_chat", "The 'session_id' query parameter is required.")
+        try:
+            session_id = uuid.UUID(raw)
+        except (TypeError, ValueError) as exc:
+            raise ApiError("invalid_chat", "'session_id' must be a UUID.") from exc
+
+        session = ChatSession.objects.filter(pk=session_id).first()
+        if session is None:
+            # A fresh browser session simply has no history yet.
+            return Response({"session_id": str(session_id), "messages": []})
+
+        messages = list(
+            session.messages.prefetch_related("tool_runs").order_by("-created_at", "-id")[:100]
+        )
+        messages.reverse()
+        return Response(
+            {
+                "session_id": str(session.id),
+                "messages": [chat_message_payload(message) for message in messages],
+            }
+        )
+
+    def post(self, request):
+        _enforce_same_origin(request)
+        if request.content_type != "application/json":
+            raise ApiError("invalid_chat", "Content-Type must be application/json.")
+        serializer = ChatRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        session_id = data.get("session_id") or uuid.uuid4()
+        session, _ = ChatSession.objects.get_or_create(id=session_id)
+        assistant = run_chat_turn(session, data["message"])
+        assistant = ChatMessage.objects.prefetch_related("tool_runs").get(pk=assistant.pk)
+        return Response(
+            {
+                "session_id": str(session.id),
+                "message": chat_message_payload(assistant),
+            }
+        )
 
 
 # --- SPA ---------------------------------------------------------------------------

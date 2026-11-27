@@ -4,6 +4,7 @@ import { Button, Divider, Layout, Select, Space, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 
 import { CitySelector } from "../components/CitySelector";
+import { ChatPanel } from "../components/ChatPanel";
 import { ConnectionBadge } from "../components/ConnectionBadge";
 import { CurrentComparison } from "../components/CurrentComparison";
 import { ExportButton } from "../components/ExportButton";
@@ -176,6 +177,7 @@ export function Dashboard() {
           />
         </div>
       </Layout.Content>
+      <ChatPanel />
     </Layout>
   );
 }

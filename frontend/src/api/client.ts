@@ -7,6 +7,8 @@ import type {
   PaginatedObservations,
   Window,
 } from "../types/weather";
+import type { ChatHistory, ChatTurn } from "../types/chat";
+import type { Health } from "../types/weather";
 
 export class ApiRequestError extends Error {
   readonly code: string;
@@ -124,6 +126,21 @@ export const api = {
     return request<{ results: CityCandidate[] }>(`/cities/search/${toQuery({ q: query, limit })}`, {
       signal,
     }).then((payload) => payload.results);
+  },
+
+  health(signal?: AbortSignal): Promise<Health> {
+    return request("/health/", { signal });
+  },
+
+  loadChatHistory(sessionId: string, signal?: AbortSignal): Promise<ChatHistory> {
+    return request(`/chat/messages/${toQuery({ session_id: sessionId })}`, { signal });
+  },
+
+  sendChatMessage(sessionId: string, message: string): Promise<ChatTurn> {
+    return request("/chat/messages/", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, message }),
+    });
   },
 
   async exportCsv(params: ExportParams, signal?: AbortSignal): Promise<ExportResult> {

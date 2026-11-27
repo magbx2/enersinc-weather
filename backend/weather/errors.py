@@ -33,6 +33,11 @@ CODES = frozenset(
         "rate_limited",
         "no_data_available",
         "cross_origin_rejected",
+        "invalid_chat",
+        "llm_not_configured",
+        "llm_unavailable",
+        "llm_empty_response",
+        "tool_round_limit",
         "internal_error",
     }
 )
@@ -81,6 +86,8 @@ def _field_code(detail: dict[str, Any]) -> str:
         return "invalid_range"
     if fields & {"cities", "city"}:
         return "invalid_city"
+    if fields & {"session_id", "message"}:
+        return "invalid_chat"
     return "invalid_city"
 
 

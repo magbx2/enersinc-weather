@@ -139,6 +139,14 @@ PROVIDER_MAX_RETRIES = int(os.environ.get("PROVIDER_MAX_RETRIES", "2"))
 PROVIDER_RETRY_BACKOFF = float(os.environ.get("PROVIDER_RETRY_BACKOFF", "0.2"))
 CURRENT_FRESHNESS_SECONDS = 60
 
+# --- Chat assistant (LiteLLM) --------------------------------------------------
+
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini").strip()
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
+LLM_API_BASE = os.environ.get("LLM_API_BASE", "").strip()
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "30"))
+LLM_MAX_TOOL_ROUNDS = int(os.environ.get("LLM_MAX_TOOL_ROUNDS", "4"))
+
 # --- Internationalization and time --------------------------------------------
 
 LANGUAGE_CODE = "en-us"
@@ -193,6 +201,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "refresh": os.environ.get("THROTTLE_REFRESH", "30/min"),
         "export": os.environ.get("THROTTLE_EXPORT", "20/min"),
+        "chat": os.environ.get("THROTTLE_CHAT", "12/min"),
     },
 }
 

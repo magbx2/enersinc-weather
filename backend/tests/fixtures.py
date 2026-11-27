@@ -6,6 +6,7 @@ same contract holds for every test package.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -73,6 +74,9 @@ def test_settings(settings):
     settings.OPENWEATHER_API_KEY = "test-key"
     settings.OPENWEATHER_BASE_URL = "https://provider.test"
     settings.PROVIDER_RETRY_BACKOFF = 0
+    settings.LLM_MODEL = "gpt-4o-mini"
+    settings.LLM_API_KEY = "test-llm-key"
+    settings.LLM_API_BASE = ""
     cache.clear()
     yield
     cache.clear()
@@ -149,3 +153,62 @@ def frozen_clock():
 @pytest.fixture
 def recent_timestamp() -> datetime:
     return FROZEN_NOW - timedelta(seconds=30)
+
+
+# --- Chat assistant fakes -------------------------------------------------------
+
+
+class FakeLiteLLM:
+    """A LiteLLM stand-in that records kwargs and returns scripted replies."""
+
+    def __init__(self, replies: list[Any]) -> None:
+        self.replies = list(replies)
+        self.calls: list[dict[str, Any]] = []
+
+    def completion(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if not self.replies:
+            raise AssertionError("FakeLiteLLM received more calls than scripted replies")
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def llm_tool_call(name: str, arguments: dict[str, Any], call_id: str = "call_1") -> dict[str, Any]:
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": name, "arguments": json.dumps(arguments)},
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+
+
+def llm_text(content: str) -> dict[str, Any]:
+    return {"choices": [{"message": {"content": content, "tool_calls": []}}]}
+
+
+@pytest.fixture
+def fake_llm(monkeypatch):
+    """Install a fake LiteLLM module and return an installer.
+
+    ``fake_llm([reply_one, reply_two])`` exercises the real wrapper, kwargs
+    construction and response parser without network access.
+    """
+
+    def _install(replies: list[Any]) -> FakeLiteLLM:
+        fake = FakeLiteLLM(replies)
+        monkeypatch.setattr("weather.chat.agent._load_litellm", lambda: fake)
+        return fake
+
+    return _install
