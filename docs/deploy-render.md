@@ -24,8 +24,11 @@ environment-driven settings in `backend/config/settings.py` are reused.
    - `weather-worker` (Celery worker)
    - `weather-beat` (Celery beat)
    - `weather-db` (managed Postgres)
-   - `weather-redis` (managed Key Value)
 3. The first deploy pauses on `sync: false` variables. In the dashboard set:
+   - `REDIS_URL` (required): Render blueprints cannot provision Redis, so
+     create a Render Key Value instance in the dashboard, or use a free
+     provider such as Upstash, and paste its URL (e.g.
+     `redis://default:pass@host:6379`).
    - `OPENWEATHER_API_KEY` (required for live data; empty is a supported
      degraded mode)
    - `LLM_API_KEY` / `LLM_API_BASE` (optional, chat assistant)
