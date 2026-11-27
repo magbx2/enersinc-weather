@@ -21,9 +21,10 @@ services:
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile.render
+    # dockerCommand overrides ENTRYPOINT+CMD, so call entrypoint.sh
+    # explicitly to keep migrations and collectstatic.
+    dockerCommand: ./entrypoint.sh daphne -b 0.0.0.0 -p $PORT config.asgi:application
     healthCheckPath: /health/
-    # Render injects PORT and expects the process to bind to it.
-    startCommand: daphne -b 0.0.0.0 -p $PORT config.asgi:application
     envVars: &backend_env
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings
@@ -68,7 +69,7 @@ services:
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile.render
-    startCommand: celery -A config worker --loglevel=info
+    dockerCommand: ./entrypoint.sh celery -A config worker --loglevel=info
     envVars: *backend_env
 
   # Celery beat: schedules refresh_tracked_cities every minute.
@@ -77,5 +78,5 @@ services:
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile.render
-    startCommand: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    dockerCommand: ./entrypoint.sh celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     envVars: *backend_env
